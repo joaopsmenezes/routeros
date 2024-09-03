@@ -1,7 +1,13 @@
 #!/bin/bash -e
 
+echo
+echo "=== azadrah.org ==="
+echo "=== https://github.com/azadrahorg ==="
+echo "=== MikroTik 7 Installer ==="
+echo
+
 # Verifica se os comandos necessários estão disponíveis
-for cmd in wget gunzip dd lsblk ip; do
+for cmd in wget gunzip dd lsblk ip df; do
     if ! command -v $cmd &> /dev/null; then
         echo "Erro: Comando $cmd não encontrado."
         exit 1
@@ -9,7 +15,7 @@ for cmd in wget gunzip dd lsblk ip; do
 done
 
 sleep 3
-wget https://download.mikrotik.com/routeros/7.15.3/chr-7.15.3-arm64.img.zip -O chr.img.zip
+wget https://download.mikrotik.com/routeros/7.11.2/chr-7.11.2.img.zip -O chr.img.zip
 
 # Verifica se o download foi bem-sucedido
 if [[ $? -ne 0 ]]; then
@@ -25,36 +31,52 @@ if [[ ! -f chr.img ]]; then
     exit 1
 fi
 
-STORAGE=$(lsblk -nd -o NAME | head -n 1)
+# Seleciona o dispositivo de armazenamento físico (ignora loopbacks e dispositivos removíveis)
+STORAGE=$(lsblk -nd -o NAME,TYPE | grep 'disk' | awk '{print $1}' | head -n 1)
 if [[ -z $STORAGE ]]; then
     echo "Erro ao identificar o dispositivo de armazenamento."
     exit 1
 fi
-echo "STORAGE is $STORAGE"
+echo "STORAGE é /dev/$STORAGE"
+
+# Verifica o espaço disponível no dispositivo de armazenamento
+SPACE_AVAILABLE=$(df -h | grep "/dev/$STORAGE" | awk '{print $4}')
+if [[ -z $SPACE_AVAILABLE ]]; then
+    echo "Erro ao verificar o espaço disponível em /dev/$STORAGE."
+    exit 1
+fi
+echo "Espaço disponível em /dev/$STORAGE: $SPACE_AVAILABLE"
 
 ETH=$(ip route show default | sed -n 's/.* dev \([^\ ]*\) .*/\1/p')
 if [[ -z $ETH ]]; then
     echo "Erro ao identificar a interface de rede."
     exit 1
 fi
-echo "ETH is $ETH"
+echo "ETH é $ETH"
 
 ADDRESS=$(ip addr show $ETH | grep global | cut -d' ' -f 6 | head -n 1)
 if [[ -z $ADDRESS ]]; then
     echo "Erro ao identificar o endereço IP."
     exit 1
 fi
-echo "ADDRESS is $ADDRESS"
+echo "ADDRESS é $ADDRESS"
 
 GATEWAY=$(ip route list | grep default | cut -d' ' -f 3)
 if [[ -z $GATEWAY ]]; then
     echo "Erro ao identificar o gateway."
     exit 1
 fi
-echo "GATEWAY is $GATEWAY"
+echo "GATEWAY é $GATEWAY"
 
 sleep 5
 
+# Verifica se o usuário tem permissões adequadas para gravar no dispositivo
+if [[ ! -w /dev/$STORAGE ]]; then
+    echo "Erro: Você não tem permissões para gravar em /dev/$STORAGE. Execute como root."
+    exit 1
+fi
+
+# Grava a imagem no dispositivo de armazenamento físico
 dd if=chr.img of=/dev/$STORAGE bs=4M oflag=sync
 
 if [[ $? -eq 0 ]]; then
